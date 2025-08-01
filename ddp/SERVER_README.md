@@ -1,6 +1,6 @@
 # WiSUN Applications Web Server Manager
 
-A command line tool for managing a web server in the background.
+A command line tool for managing a production web server in the background.
 
 ## Installation
 
@@ -14,7 +14,7 @@ pip install -r requirements.txt
 
 The server manager provides several commands:
 
-### Start the server (Development Mode)
+### Start the server
 
 ```bash
 python server.py start
@@ -26,27 +26,18 @@ or on Windows:
 server.bat start
 ```
 
-This will start the web server in the background using Flask's development server. The server will be accessible at `http://127.0.0.1:8080` by default.
-
-**Note**: You'll see a warning about using a development server. This is normal for development/testing.
-
-### Start the server (Production Mode)
-
-```bash
-python server.py start --production
-```
-
-This starts the server using a production-ready WSGI server:
-
+This will start the production web server in the background using a production WSGI server:
 - **Windows**: Uses Waitress
 - **Unix/Linux**: Uses Gunicorn (with Waitress as fallback)
 
-Production servers provide:
+The server will be accessible at `http://127.0.0.1:8080` by default.
 
-- Better performance and stability
-- Multi-threading support
-- Proper process management
-- No development server warnings
+**Features**:
+- ✅ Production-ready performance
+- ✅ Multi-threading support  
+- ✅ Proper process management
+- ✅ No development server warnings
+- ✅ Optimized for stability and security
 
 ### Stop the server
 
@@ -70,38 +61,31 @@ python server.py restart
 
 - `--host`: Specify the host to bind to (default: 127.0.0.1)
 - `--port`: Specify the port to bind to (default: 8080)
-- `--production`: Use production WSGI server instead of Flask development server
+- `--force`: Force start even if port is already in use
 
 Examples:
 
 ```bash
-# Start development server
+# Start server on default settings
 python server.py start
 
-# Start production server
-python server.py start --production
+# Start on custom host/port
+python server.py start --host 0.0.0.0 --port 8090
 
-# Start on custom host/port with production server
-python server.py start --host 0.0.0.0 --port 8090 --production
+# Force start on busy port
+python server.py start --force
 ```
 
-## Development vs Production Server
+## Production Server Features
 
-### Development Server (Default)
+The server always uses production-ready WSGI servers:
 
-- Flask's built-in server
-- **Warning displayed**: "This is a development server..."
-- Single-threaded
-- Good for development and testing
-- Auto-reloads on code changes (when not in background mode)
-
-### Production Server (`--production` flag)
-
-- Uses **Waitress** (Windows) or **Gunicorn** (Unix/Linux)
-- Multi-threaded and optimized
-- No warnings
-- Better performance and stability
-- Recommended for production deployments
+- **Waitress** (Windows) or **Gunicorn** (Unix/Linux)
+- Multi-threaded and optimized for performance
+- No Flask development server warnings
+- Better stability and security
+- Handles concurrent requests efficiently
+- Production-grade process management
 
 ## API Endpoints
 
@@ -128,11 +112,8 @@ These files are automatically cleaned up when the server is stopped properly.
 ## Examples
 
 ```bash
-# Start development server on default settings
+# Start server on default settings
 python server.py start
-
-# Start production server
-python server.py start --production
 
 # Check if server is running
 python server.py status
@@ -140,27 +121,32 @@ python server.py status
 # Stop the server
 python server.py stop
 
-# Start production server on different host/port
-python server.py start --production --host 0.0.0.0 --port 9000
+# Start server on different host/port
+python server.py start --host 0.0.0.0 --port 9000
 
-# Restart server in production mode
-python server.py restart --production
+# Force start on busy port
+python server.py start --force
+
+# Restart server
+python server.py restart
+
+# Check port availability
+python server.py check-port --port 8090
 ```
 
-## Understanding the Flask Development Server Warning
+## Production-Ready by Default
 
-When you see:
+This server tool always uses production WSGI servers, eliminating common Flask development server issues:
 
-```
-WARNING: This is a development server. Do not use it in a production deployment.
-Use a production WSGI server instead.
-```
+❌ **No more warnings** like: "This is a development server. Do not use it in a production deployment."
 
-This means you're using Flask's built-in development server, which is:
+✅ **Always production-ready** with:
+- Multi-threaded request handling
+- Optimized performance
+- Enhanced security
+- Better stability
+- Proper process management
 
-- **Single-threaded**: Can only handle one request at a time
-- **Not optimized**: Lacks performance optimizations
-- **Less secure**: Missing production-grade security features
-- **Not scalable**: Can't handle high traffic
-
-**Solution**: Use the `--production` flag to start with a production WSGI server that eliminates this warning and provides better performance.
+The tool automatically selects the best WSGI server for your platform:
+- **Windows**: Waitress
+- **Unix/Linux/macOS**: Gunicorn (with Waitress fallback)
