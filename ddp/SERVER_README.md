@@ -27,14 +27,16 @@ server.bat start
 ```
 
 This will start the production web server in the background using a production WSGI server:
+
 - **Windows**: Uses Waitress
 - **Unix/Linux**: Uses Gunicorn (with Waitress as fallback)
 
 The server will be accessible at `http://127.0.0.1:8080` by default.
 
 **Features**:
+
 - ✅ Production-ready performance
-- ✅ Multi-threading support  
+- ✅ Multi-threading support
 - ✅ Proper process management
 - ✅ No development server warnings
 - ✅ Optimized for stability and security
@@ -141,6 +143,7 @@ This server tool always uses production WSGI servers, eliminating common Flask d
 ❌ **No more warnings** like: "This is a development server. Do not use it in a production deployment."
 
 ✅ **Always production-ready** with:
+
 - Multi-threaded request handling
 - Optimized performance
 - Enhanced security
@@ -148,5 +151,6 @@ This server tool always uses production WSGI servers, eliminating common Flask d
 - Proper process management
 
 The tool automatically selects the best WSGI server for your platform:
+
 - **Windows**: Waitress
 - **Unix/Linux/macOS**: Gunicorn (with Waitress fallback)

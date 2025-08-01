@@ -206,27 +206,13 @@ def start_server(host=None, port=None, force=False):
     # Check if the requested port is available (unless forced)
     if not force and not is_port_available(DEFAULT_HOST, DEFAULT_PORT):
         port_usage = get_port_usage_info(DEFAULT_HOST, DEFAULT_PORT)
-        print(f"❌ Port {DEFAULT_PORT} is already in use!")
-        print(f"   Used by: {port_usage}")
+        print(f"⚠️  Port {DEFAULT_PORT} is already in use (used by: {port_usage})")
         
-        # Try to find an alternative port
+        # Automatically find and use an alternative port
         alternative_port = find_available_port(DEFAULT_HOST, DEFAULT_PORT + 1)
         if alternative_port:
-            print(f"💡 Suggested alternative: --port {alternative_port}")
-            
-            # Ask user if they want to use the alternative port
-            try:
-                response = input(f"Would you like to use port {alternative_port} instead? (y/N): ").strip().lower()
-                if response in ['y', 'yes']:
-                    DEFAULT_PORT = alternative_port
-                    print(f"✅ Using port {alternative_port}")
-                else:
-                    print("❌ Server startup cancelled")
-                    print("💡 Tip: Use --force to override port protection")
-                    return False
-            except (KeyboardInterrupt, EOFError):
-                print("\n❌ Server startup cancelled")
-                return False
+            print(f"� Automatically switching to port {alternative_port}")
+            DEFAULT_PORT = alternative_port
         else:
             print("❌ No alternative ports found in the range")
             print("   Try specifying a different port with --port <number>")
