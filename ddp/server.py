@@ -6,13 +6,14 @@ A command line utility to start, stop, and manage a web server in the background
 """
 
 import argparse
-import os
-import sys
-import signal
-import time
 import json
+import os
+import signal
 import subprocess
+import sys
+import time
 from pathlib import Path
+
 from flask import Flask, jsonify, request
 
 # Configuration
@@ -101,7 +102,7 @@ def is_process_running(pid):
     except (OSError, subprocess.SubprocessError):
         return False
 
-def start_server(host=None, port=None):
+def start_server(host=None, port=None, production=False):
     """Start the web server"""
     global DEFAULT_HOST, DEFAULT_PORT
     if host:
@@ -119,12 +120,15 @@ def start_server(host=None, port=None):
     # Remove stale PID file
     remove_pid_file()
     
-    print(f"Starting server on {DEFAULT_HOST}:{DEFAULT_PORT}...")
+    server_type = "production" if production else "development"
+    print(f"Starting {server_type} server on {DEFAULT_HOST}:{DEFAULT_PORT}...")
     
     # Start server in background
     if sys.platform == "win32":
         # Windows
         cmd = [sys.executable, __file__, '_run_server', '--host', DEFAULT_HOST, '--port', str(DEFAULT_PORT)]
+        if production:
+            cmd.append('--production')
         subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
     else:
         # Unix-like systems
@@ -132,11 +136,11 @@ def start_server(host=None, port=None):
         if pid == 0:
             # Child process
             os.setsid()
-            _run_server_process()
+            _run_server_process(production)
             sys.exit(0)
     
     # Wait a moment for server to start
-    time.sleep(2)
+    time.sleep(3 if production else 2)
     
     # Verify server started
     pid_info = read_pid_file()
@@ -148,7 +152,7 @@ def start_server(host=None, port=None):
         print("Failed to start server")
         return False
 
-def _run_server_process():
+def _run_server_process(use_production=False):
     """Run the actual server process"""
     app.start_time = time.time()
     
@@ -171,7 +175,48 @@ def _run_server_process():
             sys.stdout = log_file
             sys.stderr = log_file
         
-        app.run(host=DEFAULT_HOST, port=DEFAULT_PORT, debug=False)
+        if use_production:
+            # Use production WSGI server
+            try:
+                if sys.platform == "win32":
+                    # Use Waitress for Windows (and as fallback)
+                    from waitress import serve
+                    print(f"Starting production server (Waitress) on {DEFAULT_HOST}:{DEFAULT_PORT}")
+                    serve(app, host=DEFAULT_HOST, port=DEFAULT_PORT)
+                else:
+                    # Try Gunicorn for Unix systems, fallback to Waitress
+                    try:
+                        import gunicorn.app.wsgiapp
+                        print(f"Starting production server (Gunicorn) on {DEFAULT_HOST}:{DEFAULT_PORT}")
+                        # Create Gunicorn application
+                        sys.argv = [
+                            'gunicorn',
+                            '--bind', f'{DEFAULT_HOST}:{DEFAULT_PORT}',
+                            '--workers', '4',
+                            '--worker-class', 'sync',
+                            '--timeout', '30',
+                            '--keep-alive', '2',
+                            '--max-requests', '1000',
+                            '--max-requests-jitter', '100',
+                            '--access-logfile', '-',
+                            '--error-logfile', '-',
+                            'server:app'
+                        ]
+                        gunicorn.app.wsgiapp.run()
+                    except ImportError:
+                        # Fallback to Waitress
+                        from waitress import serve
+                        print(f"Starting production server (Waitress) on {DEFAULT_HOST}:{DEFAULT_PORT}")
+                        serve(app, host=DEFAULT_HOST, port=DEFAULT_PORT)
+            except ImportError:
+                print("Warning: Production WSGI server not available, falling back to development server")
+                print("Install with: pip install waitress")
+                app.run(host=DEFAULT_HOST, port=DEFAULT_PORT, debug=False)
+        else:
+            # Development server
+            print(f"Starting development server on {DEFAULT_HOST}:{DEFAULT_PORT}")
+            print("Note: This is a development server. Use --production for production deployment.")
+            app.run(host=DEFAULT_HOST, port=DEFAULT_PORT, debug=False)
     finally:
         remove_pid_file()
 
@@ -271,10 +316,14 @@ Examples:
                        default=DEFAULT_PORT,
                        help=f'Port to bind to (default: {DEFAULT_PORT})')
     
+    parser.add_argument('--production', 
+                       action='store_true',
+                       help='Use production WSGI server (Waitress/Gunicorn) instead of Flask dev server')
+    
     args = parser.parse_args()
     
     if args.command == 'start':
-        success = start_server(args.host, args.port)
+        success = start_server(args.host, args.port, args.production)
         sys.exit(0 if success else 1)
         
     elif args.command == 'stop':
@@ -289,14 +338,14 @@ Examples:
         print("Restarting server...")
         stop_server()
         time.sleep(1)
-        success = start_server(args.host, args.port)
+        success = start_server(args.host, args.port, args.production)
         sys.exit(0 if success else 1)
         
     elif args.command == '_run_server':
         # Internal command for Windows background process
         DEFAULT_HOST = args.host
         DEFAULT_PORT = args.port
-        _run_server_process()
+        _run_server_process(args.production)
 
 if __name__ == '__main__':
     main()
