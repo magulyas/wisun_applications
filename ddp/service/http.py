@@ -443,6 +443,11 @@ class HttpServer:
         return self.start(force)
 
 
+# Create a module-level app instance for Gunicorn
+# This allows Gunicorn to find the app with 'service.http:app'
+_server_instance = HttpServer()
+app = _server_instance.app
+
 # For direct execution
 if __name__ == '__main__':
     import argparse
