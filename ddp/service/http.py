@@ -11,6 +11,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -20,6 +21,30 @@ from flask import Flask, jsonify, request
 DEFAULT_HOST = '127.0.0.1'
 DEFAULT_PORT = 8080
 
+# Shared timer file for multi-worker environments
+TIMER_FILE = Path(__file__).parent.parent / 'internal_timer.timestamp'
+
+def get_internal_timer():
+    """Get the internal timer timestamp from shared file"""
+    try:
+        if TIMER_FILE.exists():
+            with open(TIMER_FILE, 'r') as f:
+                return float(f.read().strip())
+    except (ValueError, FileNotFoundError, OSError):
+        pass
+    return None
+
+def set_internal_timer(timestamp=None):
+    """Set the internal timer timestamp in shared file"""
+    if timestamp is None:
+        timestamp = time.time()
+    try:
+        with open(TIMER_FILE, 'w') as f:
+            f.write(str(timestamp))
+        return timestamp
+    except OSError:
+        return None
+
 class HttpServer:
     """HTTP Server management class"""
     
@@ -28,6 +53,9 @@ class HttpServer:
         self.port = port or DEFAULT_PORT
         self.pid_file = pid_file or Path(__file__).parent.parent / 'server.pid'
         self.log_file = log_file or Path(__file__).parent.parent / 'server.log'
+        self.internal_timer = None
+        self.watchdog_thread = None
+        self.shutdown_flag = False
         
         # Create Flask app
         self.app = Flask(__name__)
@@ -62,6 +90,74 @@ class HttpServer:
                 'host': request.host,
                 'uptime': time.time() - getattr(self.app, 'start_time', time.time())
             })
+        
+        @self.app.route('/resetTimer', methods=['GET'])
+        def reset_timer():
+            """Reset the internal timer to prevent server shutdown"""
+            old_timer = get_internal_timer()
+            new_timer = set_internal_timer()
+            print(f"[DEBUG] Worker {os.getpid()}: Timer manually reset from {old_timer} to {new_timer}")
+            return jsonify({
+                'status': 'timer_reset',
+                'previous_timer': old_timer,
+                'new_timer': new_timer,
+                'time_remaining': 300 - (time.time() - new_timer) if new_timer else 0  # 5 minutes = 300 seconds
+            })
+        
+        @self.app.route('/timerStatus', methods=['GET'])
+        def timer_status():
+            """Get the current timer status"""
+            timer_value = get_internal_timer()
+            if timer_value:
+                current_time = time.time()
+                elapsed_time = current_time - timer_value
+                remaining_time = max(0, 300 - elapsed_time)  # 5 minutes = 300 seconds
+                
+                return jsonify({
+                    'timer_initialized': True,
+                    'worker_pid': os.getpid(),
+                    'current_time': current_time,
+                    'timer_start': timer_value,
+                    'elapsed_seconds': elapsed_time,
+                    'remaining_seconds': remaining_time,
+                    'will_shutdown_at': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(timer_value + 300)),
+                    'shutdown_flag': self.shutdown_flag
+                })
+            else:
+                return jsonify({
+                    'timer_initialized': False,
+                    'worker_pid': os.getpid(),
+                    'message': 'Timer not initialized yet'
+                })
+        
+    def _check_server_status(self):
+        """Background thread to monitor server status"""
+        while not self.shutdown_flag:
+            time.sleep(5)
+            pid_info = self.read_pid_file()
+            if pid_info and self.is_process_running(pid_info['pid']):
+                # Update start time if server is running
+                self.app.start_time = pid_info['start_time']
+            else:
+                # If server is not running, reset start time
+                self.app.start_time = time.time()
+    
+    def _watchdog_timer(self):
+        """Background thread that monitors the internal timer and shuts down server after 5 minutes of inactivity"""
+        while not self.shutdown_flag:
+            time.sleep(10)  # Check every 10 seconds
+            
+            timer_value = get_internal_timer()
+            if timer_value and not self.shutdown_flag:
+                current_time = time.time()
+                time_elapsed = current_time - timer_value
+                
+                print(f"[DEBUG] Worker {os.getpid()}: Watchdog check: {time_elapsed:.1f} seconds since last timer reset")
+                
+                if time_elapsed >= 300:  # 5 minutes = 300 seconds
+                    print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] Worker {os.getpid()}: Internal timer expired after 5 minutes, shutting down server...")
+                    self.shutdown_flag = True
+                    self.stop()
     
     def write_pid_file(self, pid):
         """Write the process ID to a file"""
@@ -93,6 +189,9 @@ class HttpServer:
         try:
             if self.pid_file.exists():
                 self.pid_file.unlink()
+            # Also cleanup the timer file
+            if TIMER_FILE.exists():
+                TIMER_FILE.unlink()
             return True
         except Exception as e:
             print(f"Error removing PID file: {e}")
@@ -236,6 +335,12 @@ class HttpServer:
         
         print(f"Starting production server on {self.host}:{self.port}...")
         
+        # Initialize internal timer using shared file (for parent process)
+        timer_value = set_internal_timer()
+        self.shutdown_flag = False
+        print(f"[DEBUG] Parent process: Internal timer initialized at {timer_value}")
+        print("[DEBUG] Watchdog timers will be started in each worker process")
+        
         # Start server in background
         if sys.platform == "win32":
             # Windows
@@ -270,12 +375,21 @@ class HttpServer:
         """Run the production server process"""
         self.app.start_time = time.time()
         
+        # Initialize timer in the worker process
+        set_internal_timer()
+        
+        # Start the watchdog thread in each worker process
+        self.watchdog_thread = threading.Thread(target=self._watchdog_timer, daemon=True)
+        self.watchdog_thread.start()
+        print(f"[DEBUG] Worker {os.getpid()}: Watchdog timer started - will shutdown after 5 minutes of inactivity")
+        
         # Write PID file
         self.write_pid_file(os.getpid())
         
         # Setup signal handlers for graceful shutdown
         def signal_handler(signum, frame):
             print(f"\nReceived signal {signum}, shutting down...")
+            self.shutdown_flag = True
             self.remove_pid_file()
             sys.exit(0)
         
@@ -331,6 +445,11 @@ class HttpServer:
 
     def stop(self):
         """Stop the web server"""
+        print("Stopping server...")
+        
+        # Set shutdown flag to stop watchdog thread
+        self.shutdown_flag = True
+        
         pid_info = self.read_pid_file()
         
         if not pid_info:
