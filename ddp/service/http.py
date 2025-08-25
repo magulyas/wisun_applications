@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 
 from flask import Flask, jsonify, request
+from common_executor import CommonExecutor, ExecutionMode, ProvisionMode
+from service.provision_json import ProvisionRequest
 
 # Configuration
 DEFAULT_HOST = '127.0.0.1'
@@ -56,6 +58,9 @@ class HttpServer:
         self.internal_timer = None
         self.watchdog_thread = None
         self.shutdown_flag = False
+        
+        # Initialize common executor
+        self.common_executor = CommonExecutor(ExecutionMode.WEB_SERVICE)
         
         # Create Flask app
         self.app = Flask(__name__)
@@ -129,7 +134,28 @@ class HttpServer:
                     'worker_pid': os.getpid(),
                     'message': 'Timer not initialized yet'
                 })
-        
+
+        @self.app.route('/api/execute', methods=['POST'])
+        def execute():
+                """Runs a DDP job based on the config"""
+                try:
+                    job_config = ProvisionRequest.from_json(request.json)
+                except Exception as e:
+                    return jsonify({'error': 'Invalid job config', 'message': str(e)}), 400
+                
+                try:
+                    # Execute the provisioning job using the common executor
+                    if job_config.mode == ProvisionMode.CPMS:
+                        result = self.common_executor.execute(ProvisionMode.CPMS, job_config)
+                    elif job_config.mode == ProvisionMode.SERCA:
+                        result = self.common_executor.execute(ProvisionMode.SERCA, job_config)
+                    else:
+                        return jsonify({'error': 'Unknown execution mode'}), 500
+                    
+                    return jsonify({'status': 'success', 'result': result, 'message': 'DDP job executed successfully'})
+                except Exception as e:
+                    return jsonify({'error': 'Execution failed', 'message': str(e)}), 500
+
     def _check_server_status(self):
         """Background thread to monitor server status"""
         while not self.shutdown_flag:
